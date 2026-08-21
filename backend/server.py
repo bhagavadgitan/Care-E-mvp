@@ -1,89 +1,54 @@
-from fastapi import FastAPI, APIRouter
-from dotenv import load_dotenv
+"""CARE-E backend application entrypoint (modular monolith).
+
+Layering: API -> (AuthN/AuthZ, added later) -> Services -> Domain -> Repositories -> MongoDB.
+This M0 foundation wires configuration, database lifecycle, migrations, logging,
+centralized error handling, versioned API routing, and a health check.
+"""
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
+
+from api.v1.router import api_v1_router
+from core.config import settings
+from core.database import close_mongo_connection, connect_to_mongo
+from core.exceptions import register_exception_handlers
+from core.logging_config import configure_logging, get_logger
+from migrations.runner import run_migrations
+
+configure_logging()
+logger = get_logger("care_e.app")
 
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await connect_to_mongo()
+    await run_migrations()
+    logger.info("CARE-E backend started (env=%s, data_mode=%s)", settings.ENV, settings.DATA_MODE)
+    yield
+    await close_mongo_connection()
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+app = FastAPI(
+    title="CARE-E API",
+    description="Healthcare Supply Resolution Network — synthetic demonstration data.",
+    version=settings.API_VERSION,
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url=None,
+    openapi_url="/api/openapi.json",
+)
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
-
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
-
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
-
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
-
-# Include the router in the main app
-app.include_router(api_router)
+register_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+# All backend routes are mounted under /api (Kubernetes ingress requirement),
+# and versioned under /v1 -> effective prefix /api/v1.
+app.include_router(api_v1_router, prefix="/api")

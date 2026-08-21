@@ -6,6 +6,21 @@
 
 **CARE-E — Healthcare Supply Resolution Network.** A resolution and coordination layer that sits *above* fragmented hospital and supplier supply systems. Given a supply shortage, CARE-E discovers feasible internal (hospital-to-hospital) and external (supplier) resolution options, verifies hard constraints, ranks feasible options, and presents the **Top 3** for a **human to approve**. CARE-E recommends; authorised humans approve. It never autonomously moves inventory or purchases supplies.
 
+> ## AUTHORITATIVE DECISIONS — Review 1 (APPROVED WITH AMENDMENTS)
+> These supersede any conflicting text below.
+> 1. **Database:** MongoDB for the MVP. Keep repository/data-access abstraction + PostgreSQL appendix. Do **not** claim Mongo gives identical native relational guarantees as PostgreSQL; achieve **equivalent** integrity in the application/domain layer via JSON-Schema validation, service-layer ownership checks, unique indexes, reference validation, Mongo transactions where appropriate, and explicit consistency checks.
+> 2. **Auth transport:** Prefer **HttpOnly cookie** JWT/session (Secure in prod, appropriate SameSite) over localStorage. Follow the Emergent-managed auth platform mechanism where it mandates one.
+> 3. **Google org binding:** Google auth identifies the *user only*. It must **never** auto-create or auto-approve an organisation or bypass approval. New Hospital/Supplier orgs still flow PENDING → APPROVED/REJECTED/SUSPENDED.
+> 4. **Inventory reservation:** Recommendations are **read-only** — no reservation at recommendation time. Reservation/mutation happens only after explicit human approval, and **immediately before commit** a fresh feasibility check re-validates available qty, reserved qty, safety stock, transfer permission, expiry/usable life, deadline, and policy. If stale/invalid → return a **conflict/stale-recommendation** response and require recalculation (never execute blindly).
+> 5. **Visibility:** Server-enforced, organisation-aware, **NEED-TO-KNOW** default. Hospital: own org/facility data + relevant network candidates for resolution; no unrestricted view of unrelated hospital inventory. Supplier: relevant opportunities/requests only; no unrelated hospital data; no competitor data. Admin: broad. Policy model kept configurable.
+> 6. **Experiments:** All synthetic assumptions explicit & reproducible (transfer time, supplier lead time, transfer cost, supplier price, safety-stock rules, expiry assumptions, scenario params). Every result labelled **"Synthetic simulation under defined assumptions."** Never presented as validated real-world outcomes.
+> 7. **Resolution engine:** `backend/domain/resolution/` — pure, deterministic, LLM-free, independently testable. Hard constraints before ranking. ELIGIBLE/CONDITIONAL/INELIGIBLE with explicit reasons. Infeasible never outranks feasible. Return Top 3 feasible where available.
+> 8. **Approval transaction:** recommendation → fresh feasibility validation → transaction → inventory/reservation update → simulated transfer/PO → audit event.
+> 9. **Auditability:** Application-level audit trail for important state-changing actions (actor, organisation, action, entity, timestamp, previous state, new state). No Kafka / distributed event architecture.
+> 10. **Architecture style:** Modular monolith. No microservices without a concrete requirement.
+>
+> **Milestone status:** M0 AUTHORIZED (foundation only). M1+ NOT authorized. M0 excludes auth, Google login, org/hospital/supplier workflows, resolution engine, and dashboards beyond a minimal app shell.
+
 Confirmed platform decisions (from product owner):
 - **DB:** MongoDB for the MVP (managed by Emergent), with a database-agnostic domain/repository layer + a PostgreSQL future-migration appendix (Section H / Appendix).
 - **Auth:** JWT email/password **+** Emergent-managed Google sign-in. Authentication is kept separate from authorization.
