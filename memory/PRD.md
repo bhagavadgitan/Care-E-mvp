@@ -14,8 +14,9 @@ Hospital (procurement/inventory/ops), Supplier/Distributor, CARE-E Admin.
 
 ## Milestones
 - M0 Foundation — **DONE (2026-06)**
-- M1 Auth & Org model — NOT STARTED (awaiting authorization)
-- M2 Synthetic data · M3 Resolution engine · M4 Hospital core loop · M5 Supplier · M6 Admin/Analysis · M7 Hardening — planned.
+- M1 Auth & Org model — **DONE (2026-06)**
+- M2A Synthetic network + inventory data foundation — **DONE (2026-06)**
+- M2B+ Synthetic data expansion · M3 Resolution engine · M4 Hospital core loop · M5 Supplier · M6 Admin/Analysis · M7 Hardening — planned.
 
 ## M0 — Implemented (2026-06)
 - Backend modular monolith scaffolding: `core/` (config, database, logging, exceptions), `api/v1/` (health), `services/`, `domain/` (BaseDocument + PyObjectId), `repositories/` (interface + Mongo generic impl), `migrations/` (idempotent runner + baseline).
@@ -23,5 +24,12 @@ Hospital (procurement/inventory/ops), Supplier/Distributor, CARE-E Admin.
 - Frontend institutional shell (burgundy/charcoal/off-white theme), React Query health panel, axios apiClient with error normalization, synthetic-data badge, test-id registry.
 - Tests: 10 passing (domain base, exception hierarchy, health API integration, structured 404).
 
-## Backlog (P0 next → M1)
-Auth (email/password + Google, HttpOnly cookies, rate limiting) · Organisation/User/Facility models + approval states · role-oriented login/registration · server-side authorization guards.
+## Backlog (P0 next → M3)
+Resolution engine (`backend/domain/resolution/`): hard constraints → ELIGIBLE/CONDITIONAL/INELIGIBLE → two-stage ranking → Top 3, using the M2A synthetic data.
+
+## M2A — Implemented (2026-06)
+- Models: Product, InventoryItem (available derived), Supplier, SupplierAvailability (`domain/inventory_models.py`); Organisation/Facility gained `is_synthetic` (+ facility `code`).
+- Deterministic idempotent seed (`services/synthetic_seed.py`, RNG seed 42): 5 facilities, 100 products, 500 inventory, 20 suppliers, 226 supplier-availability rows. `ensure_seeded()` on startup; `/seed` idempotent, `/reset` destructive (DATA_MODE-guarded).
+- Canonical scenario: Hospital C needs 800 Surgical Gloves ≤12h → A feasible (avail 1200, safety 300, transfer yes), B insufficient (200), D safety-stock violation, E transfer-prohibited; supplier option 2000 units @ 6h.
+- Admin-only read APIs: `/catalog/products(+/{id})`, `/network/facilities|inventory|suppliers|supplier-availability`, `/synthetic/status|seed|reset`.
+- Migration 0003 (indexes). Targeted tests: `tests/test_m2a_synthetic.py` (7 passing). testing_agent iteration 2: 26/26 live M2A + M1 smoke passing.

@@ -2,17 +2,15 @@ import axios from "axios";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
-// All backend calls go through the versioned API base.
 export const API_BASE = `${BACKEND_URL}/api/v1`;
 
 export const apiClient = axios.create({
   baseURL: API_BASE,
-  // Cookie-based auth transport is wired in a later milestone; harmless now.
-  withCredentials: false,
+  withCredentials: true, // send/receive HttpOnly auth cookies
   headers: { "Content-Type": "application/json" },
 });
 
-// Normalize errors into { code, message, details, status } shape.
+// Normalize errors into { status, code, message, details }.
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {

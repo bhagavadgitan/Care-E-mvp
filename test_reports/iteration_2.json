@@ -1,0 +1,36 @@
+{
+  "summary": "Backend-only testing of CARE-E M2A synthetic network/inventory data foundation against the external preview URL (https://care-coordinator-25.preview.emergentagent.com/api/v1) with real HttpOnly-cookie admin auth. Created /app/backend/tests/test_m2a_live_api.py (26 tests, all passing): admin gating (unauth 401 + non-admin 403 on all 8 M2A endpoints), facilities (5, HOSP-A..E, DEMO), products (100, unique SKUs, canonical SKU-0001 'Surgical Gloves', category filter), inventory (500, reserved<=on_hand, available==on_hand-reserved>=0, unique facility/product pairs, referential integrity to facilities+products, facility_id/product_id filters), suppliers (20 DEMO) and supplier-availability (226 rows, valid qty/cost/lead-time, product filter), canonical scenario in /synthetic/status (A feasible avail 1200/safety 300/transfer true, B insufficient 200, D safety-stock violation 1000 vs 900, E transfer_permitted false, supplier option 2000 units @ 6h lead time), idempotent seeding (reset x2 and seed produce identical counts 100/500/5/20 and byte-identical inventory fingerprint => reproducible), and M1 regression smoke (unauth /auth/me 401 with cache-buster, admin /auth/me role ADMIN, hospital registration returns PENDING, wrong password rejected 401). Verified migration_0003 indexes exist in Mongo (products.sku unique, inventory facility+product, supplier_availability supplier+product, facilities.is_synthetic) and that a reset preserves non-synthetic user-registered organisations/users. No backend errors in supervisor logs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/v1/catalog/products, /network/facilities, /network/suppliers, /network/supplier-availability", "issue": "Entity responses expose the raw Mongo alias `_id` instead of a clean `id` field (FastAPI serialises BaseDocument with by_alias=True). /network/inventory correctly returns `id` via _inv_public, so the M2A read API is internally inconsistent and clients must handle two id shapes. Pre-existing pattern from M1 (organisations/facilities) — recommend a response serializer (by_alias=False) or explicit response schemas."},
+      {"endpoint": "GET /api/v1/catalog/products/{product_id}", "issue": "Unknown/invalid product_id returns 200 with {\"product\": null} instead of 404 NotFound."},
+      {"endpoint": "GET /api/v1/network/inventory, /catalog/products, /network/supplier-availability", "issue": "Hard-coded limits (1000/500/1000) with no pagination or skip/limit query params; silently truncates once synthetic data grows beyond current fixed counts. No total-vs-returned distinction (`count` is the page size, not the collection total)."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_m2a_live_api.py",
+    "/app/test_reports/pytest/m2a_live.xml"
+  ],
+  "action_items": [
+    "Decide id contract: return `id` (not `_id`) consistently from all /api/v1 entity reads, or document `_id` as the contract; today inventory uses `id` while products/facilities/suppliers/availability use `_id`.",
+    "Return 404 for GET /api/v1/catalog/products/{id} when the product does not exist.",
+    "Add pagination (limit/offset) + total count to the M2A list endpoints before the dataset grows."
+  ],
+  "critical_code_review_comments": [
+    "synthetic_seed.seed() does a full delete_many on products/inventory_items/suppliers/supplier_availability (no is_synthetic filter). Correct today (collections are 100% synthetic) but once real inventory exists this reset would wipe production data — gate it on is_synthetic or a data_mode guard now.",
+    "synthetic_seed.seed()/status() bypass the repository abstraction in places (product_repository.collection.insert_many, direct db[...] access in _counts/status/_reset), weakening the M2A 'behind the repository abstraction' requirement — add bulk_create/count methods on the repositories.",
+    "POST /synthetic/seed and /synthetic/reset are identical handlers (both call seed()); /seed should be a no-op-if-present (ensure_seeded) or the duplicate route should be removed to avoid an accidental destructive call.",
+    "status() picks canonical supplier options with .limit(5) and no sort — it relies on Mongo natural insertion order to surface the two canonical gloves offers; add an explicit sort (e.g. lead_time_hours, unit_cost) for determinism.",
+    "Seeding is unguarded against concurrency (two parallel POST /synthetic/reset calls could interleave reset+insert); add a lock or make seeding upsert-based."
+  ],
+  "updated_files": ["/app/backend/tests/test_m2a_live_api.py"],
+  "success_rate": {"backend": "100% (26/26 live M2A + M1 smoke tests passing)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Synthetic network reseeded several times via POST /api/v1/synthetic/reset (100 products, 500 inventory, 5 facilities, 20 suppliers, 226 availability rows). A few throwaway hospital registrations prefixed TEST_m2a_* / 'TEST Hospital ...' were created to verify non-admin gating and reset isolation (left PENDING; no delete endpoint exists to clean them up — organisations collection now holds ~140 non-synthetic test orgs from this and earlier iterations).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Admin bhagavadgitan.b@gmail.com / Care3-T6q4MN5bpfjw (from /app/memory/test_credentials.md) — login works, sets HttpOnly access_token/refresh_token cookies, role ADMIN.",
+  "context_for_next_testing_agent": "Use /app/backend/tests/test_m2a_live_api.py as the M2A live regression suite (external URL + requests.Session cookies; helper eid(doc) tolerates both `id` and `_id`). All M2A functional requirements verified and passing; only the 3 minor API-contract issues above are open. Note POST /synthetic/reset is destructive to synthetic data and resets ids, so re-fetch ids after any reseed. /auth/me needs a cache-buster query param. Hospital registration requires primary_facility_name in the payload. Frontend not tested at all in this iteration.",
+  "rca_of_the_issue": "No functional defect found. The `_id` exposure root cause: domain.base.BaseDocument declares `id` with alias `_id` and FastAPI's jsonable_encoder serialises Pydantic models with by_alias=True, so every endpoint returning a model directly emits `_id`; only /network/inventory avoids it because api/v1/network.py maps fields manually in _inv_public."
+}

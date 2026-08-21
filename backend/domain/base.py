@@ -39,7 +39,8 @@ class BaseDocument(BaseModel):
         return cls(**doc)
 
     def to_mongo(self, exclude_none: bool = True) -> dict:
-        data = self.model_dump(by_alias=True, exclude_none=exclude_none)
+        # mode="json" serializes enums to their values and keeps types BSON-safe.
+        data = self.model_dump(by_alias=True, exclude_none=exclude_none, mode="json")
         if data.get("_id") is None:
             data.pop("_id", None)
         return data

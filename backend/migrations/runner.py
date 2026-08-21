@@ -1,18 +1,19 @@
 """Idempotent migration runner.
 
 Applies any migrations not yet recorded in the `_migrations` collection. Safe to
-run repeatedly (on startup or via CLI). Version-controlled analog to SQL
-migrations.
+run repeatedly (on startup or via CLI).
 """
 from datetime import datetime, timezone
 
 from core.database import get_database
 from core.logging_config import get_logger
 from migrations import migration_0001_baseline as m0001
+from migrations import migration_0002_identity as m0002
+from migrations import migration_0003_catalog as m0003
 
 logger = get_logger("care_e.migrations")
 
-MIGRATIONS = [m0001]
+MIGRATIONS = [m0001, m0002, m0003]
 
 
 async def run_migrations() -> None:
